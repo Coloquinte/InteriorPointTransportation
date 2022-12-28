@@ -1,7 +1,7 @@
 import numpy as np
 
 
-class TransportationProblem:
+class TransportationMatrix:
     @staticmethod
     def make_dense_A(N: int, M: int):
         """
@@ -47,7 +47,7 @@ class TransportationProblem:
 
         The matrix is build explicitly from the result of make_dense_A
         """
-        A = TransportationProblem.make_dense_A(N, M)
+        A = TransportationMatrix.make_dense_A(N, M)
         return A @ np.diag(G) @ A.transpose()
 
     def apply_A(N: int, M: int, t):
@@ -117,3 +117,39 @@ class TransportationProblem:
         ct = np.concatenate((cts, ctt))
 
         return ct
+
+
+class TransportationProblem:
+    def __init__(self, demands, capacities, costs):
+        assert demands.ndim == 1
+        assert capacities.ndim == 1
+        assert costs.ndim == 2
+        self.demands = demands
+        self.capacities = capacities
+        self.costs = costs
+        self.N = demands.size
+        self.M = capacities.size
+        assert costs.shape == (self.N, self.M)
+        assert np.isclose(demands.sum(), capacities.sum())
+        assert (demands > 0).all()
+        assert (capacities > 0).all()
+
+    @staticmethod
+    def make_random(N, M):
+        demands = np.random.rand(N) + 1.0e-6
+        capacities = np.random.rand(M) + 1.0e-6
+        capacities = demands.sum() * capacities / capacities.sum()
+        costs = np.random.rand(N, M)
+        return TransportationProblem(demands, capacities, costs)
+
+    def initial_solution(self):
+        proportion = self.capacities / self.capacities.sum()
+        return np.expand_dims(self.demands, 1) * proportion
+
+    def check_solution(self, solution):
+        assert solution.shape == (self.N, self.M)
+        assert np.isclose(solution.sum(axis=0), self.capacities).all()
+        assert np.isclose(solution.sum(axis=1), self.demands).all()
+
+    def solve_affine_scaling(self):
+        pass
