@@ -62,6 +62,16 @@ class TransportationMatrix:
         Xt = X.sum(axis=0)
         return np.concatenate((Xs, Xt))
 
+    def apply_At(N: int, M: int, t):
+        """
+        Apply At to the vector t without forming it explicitly
+        """
+        assert t.ndim == 1
+        assert t.size == N + M - 1
+        ret = np.tile(np.expand_dims(t[:N], 1), (1, M))
+        ret[:, :-1] += t[N:]
+        return ret.flatten()
+
     def apply_AGAt(N: int, M: int, G, t):
         """
         Apply AGAt to the vector t without forming it explicitly
@@ -147,9 +157,63 @@ class TransportationProblem:
         return np.expand_dims(self.demands, 1) * proportion
 
     def check_solution(self, solution):
-        assert solution.shape == (self.N, self.M)
-        assert np.isclose(solution.sum(axis=0), self.capacities).all()
-        assert np.isclose(solution.sum(axis=1), self.demands).all()
+        if solution.shape != (self.N, self.M):
+            raise RuntimeError("Solution shape is incorrect")
+        if not np.isclose(solution.sum(axis=0), self.capacities).all():
+            rel_error = (solution.sum(axis=0) - self.capacities) / self.capacities
+            rel_error = np.abs(rel_error).max()
+            raise RuntimeError(
+                f"Capacities do not match (error max {100.0*rel_error:.2f} %)"
+            )
+        if not np.isclose(solution.sum(axis=1), self.demands).all():
+            rel_error = (solution.sum(axis=1) - self.demands) / self.demands
+            rel_error = np.abs(rel_error).max()
+            raise RuntimeError(
+                f"Demands do not match (error max {100.0*rel_error:.2f} %)"
+            )
 
-    def solve_affine_scaling(self):
-        pass
+    def initial_dual_solution(self, rel_margin=1.0e-2, abs_margin=1.0e-2):
+        ret = np.zeros(self.N + self.M - 1)
+        mincost = self.costs.min(axis=1)
+        maxcost = self.costs.max(axis=1)
+        ret[: self.N] = mincost - rel_margin * (maxcost - mincost) - abs_margin
+        return ret
+
+    def check_dual_solution(self, y):
+        assert y.shape == (self.N + self.M - 1,)
+        Aty = TransportationMatrix.apply_At(self.N, self.M, y).reshape((self.N, self.M))
+        if (Aty > self.costs).any():
+            raise RuntimeError("Invalid dual solution")
+
+    def value(self, solution):
+        assert solution.shape == (self.N, self.M)
+        return (solution * self.costs).sum()
+
+    def apply_A(self, t):
+        return TransportationMatrix.apply_A(self.N, self.M, t)
+
+    def apply_At(self, t):
+        return TransportationMatrix.apply_At(self.N, self.M, t)
+
+    def apply_AGAt(self, G, t):
+        return TransportationMatrix.apply_AGAt(self.N, self.M, G, t)
+
+    def apply_AGAt_inv(self, G, t):
+        return TransportationMatrix.apply_AGAt_inv(self.N, self.M, G, t)
+
+    def solve_affine_scaling(self, beta=0.5, epsilon=1.0e-6, residual_tol=1.0e-6):
+        x = self.initial_solution().flatten()
+        c = self.costs.flatten()
+        k = 0
+        while True:
+            # Dual variable computation: (A D^2 At)^-1 A D^2 c
+            x2 = x * x
+            y = x2 * c
+            y = self.apply_A(y)
+            y = self.apply_AGAt_inv(x2, y)
+            # Reduced cost computation
+            r = c - self.apply_At(y)
+            if (r >= -residual_tol).all() and np.dot(x, r) < epsilon:
+                return x.reshape((self.N, self.M))
+            x = x - beta * x2 * r / np.linalg.norm(x * r)
+            k += 1

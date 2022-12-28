@@ -31,6 +31,18 @@ class TransportationTest(unittest.TestCase):
                 expected = A @ x
                 self.assertTrue(np.isclose(Ax, expected).all())
 
+    def test_apply_At(self):
+        """
+        Test the implicit At against the explicit result
+        """
+        for N, M in params_list:
+            with self.subTest(N=N, M=M):
+                A = TransportationMatrix.make_dense_A(N, M)
+                x = np.random.rand(N + M - 1)
+                Atx = TransportationMatrix.apply_At(N, M, x)
+                expected = A.transpose() @ x
+                self.assertTrue(np.isclose(Atx, expected).all())
+
     def test_apply_AGAt(self):
         """
         Test the implicit AGAt against the explicit result
@@ -65,6 +77,26 @@ class TransportationTest(unittest.TestCase):
             with self.subTest(N=N, M=M):
                 prob = TransportationProblem.make_random(N, M)
                 sol = prob.initial_solution()
+                prob.check_solution(sol)
+
+    def test_initial_solution(self):
+        """
+        Test that the initial dual solution from the transportation problem is correct
+        """
+        for N, M in params_list:
+            with self.subTest(N=N, M=M):
+                prob = TransportationProblem.make_random(N, M)
+                sol = prob.initial_dual_solution()
+                prob.check_dual_solution(sol)
+
+    def test_affine_scaling(self):
+        """
+        Run the primal affine scaling algorithm
+        """
+        for N, M in params_list:
+            with self.subTest(N=N, M=M):
+                prob = TransportationProblem.make_random(N, M)
+                sol = prob.solve_affine_scaling()
                 prob.check_solution(sol)
 
 
