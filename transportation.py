@@ -27,9 +27,9 @@ class TransportationMatrix:
         assert G.ndim == 1
         assert G.size == N * M
         X = G.reshape((N, M))
-        Xs = X.sum(axis=1)
+        Xs = X @ np.ones(M)
         X = X[:, :-1]  # Redundant constraint removed
-        Xt = X.sum(axis=0)
+        Xt = np.ones(N) @ X
         ret = np.zeros((N + M - 1, N + M - 1))
         for i in range(N):
             ret[i, i] = Xs[i]
@@ -57,9 +57,9 @@ class TransportationMatrix:
         assert t.ndim == 1
         assert t.size == N * M
         X = t.reshape((N, M))
-        Xs = X.sum(axis=1)
+        Xs = X @ np.ones(M)
         X = X[:, :-1]  # Redundant constraint removed
-        Xt = X.sum(axis=0)
+        Xt = np.ones(N) @ X
         return np.concatenate((Xs, Xt))
 
     def apply_At(N: int, M: int, t):
@@ -68,7 +68,8 @@ class TransportationMatrix:
         """
         assert t.ndim == 1
         assert t.size == N + M - 1
-        ret = np.tile(np.expand_dims(t[:N], 1), (1, M))
+        ret = np.zeros((N, M))
+        ret[:N, :] = np.expand_dims(t[:N], 1)
         ret[:, :-1] += t[N:]
         return ret.flatten()
 
@@ -80,9 +81,9 @@ class TransportationMatrix:
         assert G.size == N * M
         assert t.size == N + M - 1
         X = G.reshape((N, M))
-        Xs = X.sum(axis=1)
+        Xs = X @ np.ones(M)
         X = X[:, :-1]  # Redundant constraint removed
-        Xt = X.sum(axis=0)
+        Xt = np.ones(N) @ X
         # Apply as a block matrix
         ts = t[:N]
         tt = t[N:]
@@ -99,9 +100,9 @@ class TransportationMatrix:
         assert G.size == N * M
         assert t.size == N + M - 1
         X = G.reshape((N, M))
-        Xs = X.sum(axis=1)
+        Xs = X @ np.ones(M)
         X = X[:, :-1]  # Redundant constraint removed
-        Xt = X.sum(axis=0)
+        Xt = np.ones(N) @ X
 
         # Upper diagonal block (just a diagonal matrix)
         Ds = Xs
