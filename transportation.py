@@ -218,3 +218,40 @@ class TransportationProblem:
                 return x.reshape((self.N, self.M))
             x = x - beta * x2 * r / np.linalg.norm(x * r)
             k += 1
+
+    def solve_highs(self):
+        import highspy
+
+        solver = highspy.Highs()
+        inf = highspy.kHighsInf
+        min_vars = np.zeros(self.N * self.M)
+        max_vars = np.full(self.N * self.M, inf)
+        solver.addVars(self.N * self.M, min_vars, max_vars)
+        for i in range(self.N):
+            row_inds = np.zeros(self.M, dtype=np.int32)
+            row_vals = np.ones(self.M, dtype=np.float64)
+            for j in range(self.M):
+                row_inds[j] = self.M * i + j
+            solver.addRow(self.demands[i], self.demands[i], self.M, row_inds, row_vals)
+        for j in range(self.M):
+            row_inds = np.zeros(self.N, dtype=np.int32)
+            row_vals = np.ones(self.N, dtype=np.float64)
+            for i in range(self.N):
+                row_inds[i] = self.M * i + j
+            solver.addRow(
+                self.capacities[j], self.capacities[j], self.N, row_inds, row_vals
+            )
+        col_inds = np.zeros(self.N * self.M, dtype=np.int32)
+        col_costs = self.costs.flatten()
+        for i in range(self.N * self.M):
+            col_inds[i] = i
+        solver.changeColsCost(self.N * self.M, col_inds, col_costs)
+        options = solver.getOptions()
+        options.presolve = "off"
+        options.solver = "ipm"
+        options.run_crossover = "off"
+        options.log_to_console = True
+        solver.passOptions(options)
+        solver.run()
+        solution = solver.getSolution()
+        return np.asarray(solution.col_value, dtype=np.float64).reshape(self.N, self.M)
