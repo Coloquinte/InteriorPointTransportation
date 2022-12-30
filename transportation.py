@@ -215,10 +215,11 @@ class TransportationProblem:
     def apply_AGAt_inv(self, G, t):
         return TransportationMatrix.apply_AGAt_inv(self.N, self.M, G, t)
 
-    def solve_affine_scaling(self, beta=0.5, epsilon=1.0e-6, residual_tol=1.0e-6):
+    def solve_affine_scaling(self, beta=0.95, epsilon=1.0e-2, residual_tol=1.0e-2):
         x = self.initial_solution().flatten()
         c = self.costs.flatten()
         k = 0
+        print(f"Initial value {self.value(x.reshape((self.N, self.M)))}")
         while True:
             # Dual variable computation: (A D^2 At)^-1 A D^2 c
             x2 = x * x
@@ -227,7 +228,13 @@ class TransportationProblem:
             y = self.apply_AGAt_inv(x2, y)
             # Reduced cost computation
             r = c - self.apply_At(y)
-            if (r >= -residual_tol).all() and np.dot(x, r) < epsilon:
+            residual = np.dot(x, r)
+            min_reduced = r.min()
+            value = self.value(x.reshape((self.N, self.M)))
+            print(
+                f"Iter {k+1}: value {value}, residual {residual}, min reduced cost {min_reduced}"
+            )
+            if min_reduced >= -residual_tol and residual < epsilon:
                 return x.reshape((self.N, self.M))
             x = x - beta * x2 * r / np.linalg.norm(x * r)
             k += 1
