@@ -132,18 +132,28 @@ class TransportationMatrix:
 
 class TransportationProblem:
     def __init__(self, demands, capacities, costs):
-        assert demands.ndim == 1
-        assert capacities.ndim == 1
-        assert costs.ndim == 2
-        self.demands = demands
-        self.capacities = capacities
-        self.costs = costs
+        self.demands, self.capacities = TransportationProblem.normalize_demands_capas(
+            demands, capacities
+        )
+        self.costs = TransportationProblem.normalize_costs(costs)
         self.N = demands.size
         self.M = capacities.size
-        assert costs.shape == (self.N, self.M)
-        assert np.isclose(demands.sum(), capacities.sum())
+
+    @staticmethod
+    def normalize_costs(costs):
+        assert costs.ndim == 2
+        costs = costs - costs.min(axis=1, keepdims=True)
+        costs = costs / costs.mean()
+        return costs
+
+    def normalize_demands_capas(demands, capacities):
+        assert demands.ndim == 1
+        assert capacities.ndim == 1
         assert (demands > 0).all()
         assert (capacities > 0).all()
+        assert np.isclose(demands.sum(), capacities.sum())
+        total_dem = demands.sum()
+        return demands / total_dem, capacities / total_dem
 
     @staticmethod
     def make_random(N, M):
@@ -173,11 +183,14 @@ class TransportationProblem:
                 f"Demands do not match (error max {100.0*rel_error:.2f} %)"
             )
 
-    def initial_dual_solution(self, rel_margin=1.0e-2, abs_margin=1.0e-2):
+    def initial_dual_solution(self, margin=1.0e-2):
+        assert (self.costs >= 0.0).all()
+        assert np.isclose(self.costs.mean(), 1.0)
         ret = np.zeros(self.N + self.M - 1)
         mincost = self.costs.min(axis=1)
         maxcost = self.costs.max(axis=1)
-        ret[: self.N] = mincost - rel_margin * (maxcost - mincost) - abs_margin
+        ret[: self.N] = -margin / 2
+        ret[self.N :] = -margin / 2
         return ret
 
     def check_dual_solution(self, y):
