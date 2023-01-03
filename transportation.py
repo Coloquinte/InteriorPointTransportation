@@ -152,8 +152,8 @@ class TransportationProblem:
         assert (demands > 0).all()
         assert (capacities > 0).all()
         assert np.isclose(demands.sum(), capacities.sum())
-        total_dem = demands.sum()
-        return demands / total_dem, capacities / total_dem
+        mean_dem = demands.mean()
+        return demands / mean_dem, capacities / mean_dem
 
     @staticmethod
     def make_random(N, M):
