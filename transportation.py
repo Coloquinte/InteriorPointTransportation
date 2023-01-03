@@ -301,3 +301,34 @@ class TransportationProblem:
         solver.run()
         solution = solver.getSolution()
         return np.asarray(solution.col_value, dtype=np.float64).reshape(self.N, self.M)
+
+    def solve_ortools(self):
+        from ortools.linear_solver import pywraplp
+
+        solver = pywraplp.Solver.CreateSolver("GLOP")
+        x = [
+            [solver.NumVar(0, solver.infinity(), f"x_{i}_{j}") for j in range(self.M)]
+            for i in range(self.N)
+        ]
+        for i in range(self.N):
+            solver.Add(solver.Sum(x[i]) == self.demands[i])
+        for j in range(self.M):
+            solver.Add(
+                solver.Sum([x[i][j] for i in range(self.N)]) == self.capacities[j]
+            )
+        solver.Minimize(
+            solver.Sum(
+                [
+                    self.costs[i, j] * x[i][j]
+                    for i in range(self.N)
+                    for j in range(self.M)
+                ]
+            )
+        )
+
+        solver.EnableOutput()
+        status = solver.Solve()
+        assert status == pywraplp.Solver.OPTIMAL
+        return np.asarray(
+            [[x[i][j].solution_value() for j in range(self.M)] for i in range(self.N)]
+        )
