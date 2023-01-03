@@ -195,7 +195,7 @@ class TransportationProblem:
 
     def check_dual_solution(self, y):
         assert y.shape == (self.N + self.M - 1,)
-        Aty = TransportationMatrix.apply_At(self.N, self.M, y).reshape((self.N, self.M))
+        Aty = self.apply_At(y).reshape((self.N, self.M))
         if (Aty > self.costs).any():
             raise RuntimeError("Invalid dual solution")
 
@@ -215,7 +215,7 @@ class TransportationProblem:
     def apply_AGAt_inv(self, G, t):
         return TransportationMatrix.apply_AGAt_inv(self.N, self.M, G, t)
 
-    def solve_affine_scaling(self, beta=0.95, epsilon=1.0e-2, residual_tol=1.0e-2):
+    def solve_affine_scaling(self, beta=0.995, epsilon=1.0e-6, residual_tol=1.0e-6):
         x = self.initial_solution().flatten()
         c = self.costs.flatten()
         k = 0
@@ -227,17 +227,43 @@ class TransportationProblem:
             y = self.apply_A(y)
             y = self.apply_AGAt_inv(x2, y)
             # Reduced cost computation
-            r = c - self.apply_At(y)
-            residual = np.dot(x, r)
-            min_reduced = r.min()
+            s = c - self.apply_At(y)
+            residual = np.dot(x, s)
+            min_reduced = s.min()
             value = self.value(x.reshape((self.N, self.M)))
             print(
                 f"Iter {k+1}: value {value}, residual {residual}, min reduced cost {min_reduced}"
             )
             if min_reduced >= -residual_tol and residual < epsilon:
                 return x.reshape((self.N, self.M))
-            x = x - beta * x2 * r / np.linalg.norm(x * r)
+            x = x - beta * x2 * s / np.linalg.norm(x * s)
             k += 1
+
+    def solve_dual_affine_scaling(
+        self, beta=0.995, epsilon=1.0e-6, primal_tol=1.0e-2
+    ):
+        y = self.initial_dual_solution().flatten()
+        c = self.costs.flatten()
+        b = np.concatenate((self.demands, self.capacities))[:-1]
+        k = 0
+        while True:
+            s = c - self.apply_At(y)
+            assert (s >= 0).all()
+            s_msquare = 1.0 / s**2
+            d_y = self.apply_AGAt_inv(s_msquare, b)
+            d_s = -self.apply_At(d_y)
+            alpha = -beta / min(min(d_s / s), -1)
+            y = y + alpha * d_y
+            x = -s_msquare * d_s
+            residual = np.dot(x, s)
+            min_primal = x.min()
+            value = self.value(x.reshape((self.N, self.M)))
+            print(
+                f"Iter {k+1}: value {value}, residual {residual}, min primal value {min_primal}"
+            )
+            if min_primal >= -primal_tol and residual < epsilon:
+                return x.reshape((self.N, self.M))
+            k = k + 1
 
     def solve_highs(self):
         import highspy
