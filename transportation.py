@@ -342,7 +342,6 @@ class TransportationProblem:
     ):
         c = self.costs.flatten()
         b = np.concatenate((self.demands, self.capacities))[:-1]
-        a = TransportationMatrix.make_dense_A(self.N, self.M)
 
         x = self.initial_solution().flatten()
         y = self.initial_dual_solution(1.0).flatten()
@@ -362,8 +361,8 @@ class TransportationProblem:
 
         for niter in range(max_iter):
             # Compute residuals and update mu
-            r_b = a @ x - b
-            r_c = a.T @ y + s - c
+            r_b = self.apply_A(x) - b
+            r_c = self.apply_At(y) + s - c
             r_x_s = x * s
             mu = np.mean(r_x_s)
             f = c.T.dot(x)
@@ -384,7 +383,7 @@ class TransportationProblem:
             # ----- Predictor step -----
 
             # Get affine-scaling direction
-            dx_aff, dy_aff, ds_aff = self.newton_direction(r_b, r_c, r_x_s, a, x, s)
+            dx_aff, dy_aff, ds_aff = self.newton_direction(r_b, r_c, r_x_s, x, s)
 
             # Get affine-scaling step length
             alpha_x_aff, alpha_s_aff = self.step_size(x, s, dx_aff, ds_aff, 1)
@@ -401,7 +400,7 @@ class TransportationProblem:
             r_x_s = r_x_s + dx_aff * ds_aff - sigma * mu * np.ones((self.N * self.M))
 
             # Get corrector's direction
-            dx_cc, dy_cc, ds_cc = self.newton_direction(r_b, r_c, r_x_s, a, x, s)
+            dx_cc, dy_cc, ds_cc = self.newton_direction(r_b, r_c, r_x_s, x, s)
 
             # Compute search direction and step
             dx = dx_aff + dx_cc
@@ -423,21 +422,21 @@ class TransportationProblem:
 
         return x.reshape((self.N, self.M))
 
-    def newton_direction(self, r_b, r_c, r_x_s, A, x, s):
+    def newton_direction(self, r_b, r_c, r_x_s, x, s):
         # Block cholesky solve for D dx + A dy = u, At dx = v
         u = -r_c + r_x_s / x
         v = -r_b
         D = -np.minimum(1e16, s / x)
 
         # First triangular solve
-        v = v - A @ (u / D)
+        v = v - self.apply_A(u / D)
 
         # Diagonal solve
         u = u / D
-        dy = np.linalg.solve(-A @ np.diag(1.0 / D) @ A.T, v)
+        dy = -self.apply_AGAt_inv(1.0 / D, v)
 
         # Second diagonal solve
-        dx = u - (A.T @ dy) / D
+        dx = u - self.apply_At(dy) / D
 
         # Final step
         ds = -(r_x_s + s * dx) / x
