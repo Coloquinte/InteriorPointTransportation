@@ -444,8 +444,8 @@ class TransportationProblem:
         return dx, dy, ds
 
     def step_size(self, x, s, d_x, d_s, eta=0.9995):
-        alpha_x = -1 / min(min(d_x / x), -1)
+        alpha_x = -1 / min((d_x / x).min(), -1)
         alpha_x = min(1, eta * alpha_x)
-        alpha_s = -1 / min(min(d_s / s), -1)
+        alpha_s = -1 / min((d_s / s).min(), -1)
         alpha_s = min(1, eta * alpha_s)
         return alpha_x, alpha_s
