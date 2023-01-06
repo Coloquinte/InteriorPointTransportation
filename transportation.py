@@ -3,129 +3,6 @@ import numpy as np
 from numpy.linalg import norm
 
 
-def newton_direction(r_b, r_c, r_x_s, A, x, s):
-    # Block cholesky solve for D dx + A dy = u, At dx = v
-    u = -r_c + r_x_s / x
-    v = -r_b
-    D = -np.minimum(1e16, s / x)
-
-    # First triangular solve
-    v = v - A @ (u / D)
-
-    # Diagonal solve
-    u = u / D
-    dy = np.linalg.solve(-A @ np.diag(1.0 / D) @ A.T, v)
-
-    # Second diagonal solve
-    dx = u - (A.T @ dy) / D
-
-    # Final step
-    ds = -(r_x_s + s * dx) / x
-
-    return dx, dy, ds
-
-
-def step_size(x, s, d_x, d_s, eta=0.9995):
-    alpha_x = -1 / min(min(d_x / x), -1)
-    alpha_x = min(1, eta * alpha_x)
-    alpha_s = -1 / min(min(d_s / s), -1)
-    alpha_s = min(1, eta * alpha_s)
-    return alpha_x, alpha_s
-
-
-def mpc_sol(
-    a,
-    b,
-    c,
-    x,
-    y,
-    s,
-    max_iter=100,
-    eps=1e-9,
-    theta=0.9995,
-    verbose=2,
-):
-    m, n = a.shape
-    # Initialization
-    alpha_x = 0
-    alpha_s = 0
-
-    if verbose > 1:
-        print(
-            "\n%3s %6s %9s %11s %9s %9s %9s\n"
-            % ("ITER", "COST", "MU", "RESIDUAL", "ALPHAX", "ALPHAS", "MAXVIOL")
-        )
-
-    bc = 1 + max([norm(b), norm(c)])
-
-    # Start the loop
-    niter_done = 0
-
-    for niter in range(max_iter):
-        # Compute residuals and update mu
-        r_b = a @ x - b
-        r_c = a.T @ y + s - c
-        r_x_s = x * s
-        mu = np.mean(r_x_s)
-        f = c.T.dot(x)
-
-        # Check relative decrease in residual, for purposes of convergence test
-        residual = norm(np.hstack((r_b, r_c, r_x_s)) / bc)
-
-        if verbose > 1:
-            maxviol = max(np.max(np.abs(r_b)), np.max(-x))
-            print(
-                "%3d %9.2e %9.2e %9.2e %9.4g %9.4g %9.2e"
-                % (niter, f, mu, residual, alpha_x, alpha_s, maxviol)
-            )
-
-        if residual < eps:
-            break
-
-        # ----- Predictor step -----
-
-        # Get affine-scaling direction
-        dx_aff, dy_aff, ds_aff = newton_direction(r_b, r_c, r_x_s, a, x, s)
-
-        # Get affine-scaling step length
-        alpha_x_aff, alpha_s_aff = step_size(x, s, dx_aff, ds_aff, 1)
-        mu_aff = (x + alpha_x_aff * dx_aff).dot(s + alpha_s_aff * ds_aff) / n
-
-        # Set central parameter
-        sigma = (mu_aff / mu) ** 3
-
-        # ----- Corrector step -----
-
-        # Set up right hand sides
-        r_x_s = r_x_s + dx_aff * ds_aff - sigma * mu * np.ones((n))
-
-        # Get corrector's direction
-        dx_cc, dy_cc, ds_cc = newton_direction(r_b, r_c, r_x_s, a, x, s)
-
-        # Compute search direction and step
-        dx = dx_aff + dx_cc
-        dy = dy_aff + dy_cc
-        ds = ds_aff + ds_cc
-
-        alpha_x, alpha_s = step_size(x, s, dx, ds, theta)
-
-        # Update iterates
-        x = x + alpha_x * dx
-        y = y + alpha_s * dy
-        s = s + alpha_s * ds
-
-        if niter == max_iter and verbose > 1:
-            print("max_iter reached!\n")
-        niter_done = niter
-
-    if verbose > 0:
-        print("\nDONE! [m,n] = [%d, %d], N = %d\n" % (m, n, niter))
-
-    f = c.T.dot(x)
-
-    return f, x, y, s, niter_done
-
-
 class TransportationMatrix:
     @staticmethod
     def make_dense_A(N: int, M: int):
@@ -388,17 +265,6 @@ class TransportationProblem:
                 return x.reshape((self.N, self.M))
             k = k + 1
 
-    def solve_mpc(self):
-        c = self.costs.flatten()
-        b = np.concatenate((self.demands, self.capacities))[:-1]
-        a = TransportationMatrix.make_dense_A(self.N, self.M)
-
-        x = self.initial_solution().flatten()
-        y = self.initial_dual_solution(1.0).flatten()
-        s = c - self.apply_At(y)
-        x = mpc_sol(a, b, c, x=x, y=y, s=s)[1]
-        return x.reshape((self.N, self.M))
-
     def solve_highs(self):
         import highspy
 
@@ -466,3 +332,121 @@ class TransportationProblem:
         return np.asarray(
             [[x[i][j].solution_value() for j in range(self.M)] for i in range(self.N)]
         )
+
+    def solve_mpc(
+        self,
+        max_iter=100,
+        eps=1e-9,
+        theta=0.9995,
+        verbose=2,
+    ):
+        c = self.costs.flatten()
+        b = np.concatenate((self.demands, self.capacities))[:-1]
+        a = TransportationMatrix.make_dense_A(self.N, self.M)
+
+        x = self.initial_solution().flatten()
+        y = self.initial_dual_solution(1.0).flatten()
+        s = c - self.apply_At(y)
+
+        # Initialization
+        alpha_x = 0
+        alpha_s = 0
+
+        if verbose > 1:
+            print(
+                "\n%3s %6s %9s %11s %9s %9s %9s\n"
+                % ("ITER", "COST", "MU", "RESIDUAL", "ALPHAX", "ALPHAS", "MAXVIOL")
+            )
+
+        bc = 1 + max([norm(b), norm(c)])
+
+        for niter in range(max_iter):
+            # Compute residuals and update mu
+            r_b = a @ x - b
+            r_c = a.T @ y + s - c
+            r_x_s = x * s
+            mu = np.mean(r_x_s)
+            f = c.T.dot(x)
+
+            # Check relative decrease in residual, for purposes of convergence test
+            residual = norm(np.hstack((r_b, r_c, r_x_s)) / bc)
+
+            if verbose > 1:
+                maxviol = max(np.max(np.abs(r_b)), np.max(-x))
+                print(
+                    "%3d %9.2e %9.2e %9.2e %9.4g %9.4g %9.2e"
+                    % (niter, f, mu, residual, alpha_x, alpha_s, maxviol)
+                )
+
+            if residual < eps:
+                break
+
+            # ----- Predictor step -----
+
+            # Get affine-scaling direction
+            dx_aff, dy_aff, ds_aff = self.newton_direction(r_b, r_c, r_x_s, a, x, s)
+
+            # Get affine-scaling step length
+            alpha_x_aff, alpha_s_aff = self.step_size(x, s, dx_aff, ds_aff, 1)
+            mu_aff = (x + alpha_x_aff * dx_aff).dot(s + alpha_s_aff * ds_aff) / (
+                self.N * self.M
+            )
+
+            # Set central parameter
+            sigma = (mu_aff / mu) ** 3
+
+            # ----- Corrector step -----
+
+            # Set up right hand sides
+            r_x_s = r_x_s + dx_aff * ds_aff - sigma * mu * np.ones((self.N * self.M))
+
+            # Get corrector's direction
+            dx_cc, dy_cc, ds_cc = self.newton_direction(r_b, r_c, r_x_s, a, x, s)
+
+            # Compute search direction and step
+            dx = dx_aff + dx_cc
+            dy = dy_aff + dy_cc
+            ds = ds_aff + ds_cc
+
+            alpha_x, alpha_s = self.step_size(x, s, dx, ds, theta)
+
+            # Update iterates
+            x = x + alpha_x * dx
+            y = y + alpha_s * dy
+            s = s + alpha_s * ds
+
+            if niter == max_iter and verbose > 1:
+                print("max_iter reached!\n")
+
+        if verbose > 0:
+            print("\nDONE! [m,n] = [%d, %d], N = %d\n" % (self.M, self.N, niter))
+
+        return x.reshape((self.N, self.M))
+
+    def newton_direction(self, r_b, r_c, r_x_s, A, x, s):
+        # Block cholesky solve for D dx + A dy = u, At dx = v
+        u = -r_c + r_x_s / x
+        v = -r_b
+        D = -np.minimum(1e16, s / x)
+
+        # First triangular solve
+        v = v - A @ (u / D)
+
+        # Diagonal solve
+        u = u / D
+        dy = np.linalg.solve(-A @ np.diag(1.0 / D) @ A.T, v)
+
+        # Second diagonal solve
+        dx = u - (A.T @ dy) / D
+
+        # Final step
+        ds = -(r_x_s + s * dx) / x
+
+        return dx, dy, ds
+
+    def step_size(self, x, s, d_x, d_s, eta=0.9995):
+        alpha_x = -1 / min(min(d_x / x), -1)
+        alpha_x = min(1, eta * alpha_x)
+        alpha_s = -1 / min(min(d_s / s), -1)
+        alpha_s = min(1, eta * alpha_s)
+        return alpha_x, alpha_s
