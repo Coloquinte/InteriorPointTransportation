@@ -2,27 +2,24 @@ import numpy as np
 
 from numpy.linalg import norm
 
-from scipy import sparse
-from scipy.sparse.linalg import spsolve
 
-def newton_direction(r_b, r_c, r_x_s, a, x, s):
+def newton_direction(r_b, r_c, r_x_s, A, x, s):
+    # Block cholesky solve for D dx + A dy = u, At dx = v
+    u = -r_c + r_x_s / x
+    v = -r_b
+    D = -np.minimum(1e16, s / x)
 
-    p1 = -r_b
-    p2 = -r_c + r_x_s / x
-    d_2 = -np.minimum(1e16, s / x)
+    # First triangular solve
+    v = v - A @ (u / D)
 
-    # Block cholesky
-    u, v = p2, p1
+    # Diagonal solve
+    u = u / D
+    dy = np.linalg.solve(-A @ np.diag(1.0 / D) @ A.T, v)
 
-    v = v - a @ (u / d_2)
+    # Second diagonal solve
+    dx = u - (A.T @ dy) / D
 
-    u = u / d_2
-    v = np.linalg.solve(-a @ np.diag(1.0/d_2) @ a.T, v)
-
-    u = u - (a.T * v) / d_2
-
-    dx = u
-    dy = v
+    # Final step
     ds = -(r_x_s + s * dx) / x
 
     return dx, dy, ds
@@ -48,14 +45,8 @@ def mpc_sol(
     theta=0.9995,
     verbose=2,
 ):
-
-    a = sparse.coo_matrix(a)
-    c = np.squeeze(np.array(c))
-    b = np.squeeze(np.array(b))
-
-    # Initialization
-
     m, n = a.shape
+    # Initialization
     alpha_x = 0
     alpha_s = 0
 
@@ -72,8 +63,8 @@ def mpc_sol(
 
     for niter in range(max_iter):
         # Compute residuals and update mu
-        r_b = a * x - b
-        r_c = a.T * y + s - c
+        r_b = a @ x - b
+        r_c = a.T @ y + s - c
         r_x_s = x * s
         mu = np.mean(r_x_s)
         f = c.T.dot(x)
@@ -94,9 +85,7 @@ def mpc_sol(
         # ----- Predictor step -----
 
         # Get affine-scaling direction
-        dx_aff, dy_aff, ds_aff = newton_direction(
-            r_b, r_c, r_x_s, a, x, s
-        )
+        dx_aff, dy_aff, ds_aff = newton_direction(r_b, r_c, r_x_s, a, x, s)
 
         # Get affine-scaling step length
         alpha_x_aff, alpha_s_aff = step_size(x, s, dx_aff, ds_aff, 1)
@@ -111,9 +100,7 @@ def mpc_sol(
         r_x_s = r_x_s + dx_aff * ds_aff - sigma * mu * np.ones((n))
 
         # Get corrector's direction
-        dx_cc, dy_cc, ds_cc = newton_direction(
-            r_b, r_c, r_x_s, a, x, s
-        )
+        dx_cc, dy_cc, ds_cc = newton_direction(r_b, r_c, r_x_s, a, x, s)
 
         # Compute search direction and step
         dx = dx_aff + dx_cc
@@ -137,7 +124,6 @@ def mpc_sol(
     f = c.T.dot(x)
 
     return f, x, y, s, niter_done
-
 
 
 class TransportationMatrix:
@@ -386,7 +372,7 @@ class TransportationProblem:
         while True:
             s = c - self.apply_At(y)
             assert (s >= 0).all()
-            s_msquare = 1.0 / (s + 1.0e-10)**2
+            s_msquare = 1.0 / (s + 1.0e-10) ** 2
             d_y = self.apply_AGAt_inv(s_msquare, b)
             d_s = -self.apply_At(d_y)
             alpha = -beta / min(d_s / s)
@@ -411,43 +397,7 @@ class TransportationProblem:
         y = self.initial_dual_solution(1.0).flatten()
         s = c - self.apply_At(y)
         x = mpc_sol(a, b, c, x=x, y=y, s=s)[1]
-        #x = mpc_sol(a, b, c)[1]
         return x.reshape((self.N, self.M))
-
-    def solve_primal_dual(self, beta=0.995, epsilon=1.0e-6):
-        x = self.initial_solution().flatten()
-        y = self.initial_dual_solution().flatten()
-        c = self.costs.flatten()
-        b = np.concatenate((self.demands, self.capacities))[:-1]
-        s = c - self.apply_At(y)
-        k = 0
-        print(f"Initial value {self.value(x.reshape((self.N, self.M)))}")
-        while True:
-            mu = np.mean(np.dot(x, s))
-            sigma = 1.0
-            vec = (x * s - mu * sigma) / s
-            # Compute y step
-            d_y = vec
-            d_y = self.apply_A(d_y)
-            d_y = -self.apply_AGAt_inv(x / s, d_y)
-            # Compute s step
-            d_s = -self.apply_At(d_y)
-            d_x = vec - x * d_s / s
-            gamma_x = max(d_x / x)
-            alpha_x = beta / gamma_x
-            gamma_s = max(d_s / s)
-            alpha_s = beta / gamma_s
-            if (s - alpha_s * d_s < 0).any():
-                import pdb; pdb.set_trace()
-            x = x - alpha_x * d_x
-            s = s - alpha_s * d_s
-            y = y - alpha_s * d_y
-            residual = np.dot(x, s)
-            print(f"Step {alpha_x}, {alpha_s}")
-            print(f"Min primal {x.min()}, min dual {s.min()}")
-            value = self.value(x.reshape((self.N, self.M)))
-            print(f"Iter {k+1}: value {value}, residual {residual}")
-            k += 1
 
     def solve_highs(self):
         import highspy
