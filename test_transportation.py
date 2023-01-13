@@ -69,7 +69,7 @@ class TransportationTest(unittest.TestCase):
                 expected = np.linalg.solve(AGAt, x)
                 self.assertTrue(np.isclose(AGAt_inv_x, expected).all())
 
-    def test_initial_solution(self):
+    def test_initial_primal_solution(self):
         """
         Test that the initial solution from the transportation problem is correct
         """
@@ -79,7 +79,7 @@ class TransportationTest(unittest.TestCase):
                 sol = prob.initial_solution()
                 prob.check_solution(sol)
 
-    def test_initial_solution(self):
+    def test_initial_dual_solution(self):
         """
         Test that the initial dual solution from the transportation problem is correct
         """

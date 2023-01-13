@@ -70,9 +70,10 @@ class TransportationMatrix:
         """
         assert t.ndim == 1
         assert t.size == N + M - 1
-        ret = np.zeros((N, M))
-        ret[:N, :] = np.expand_dims(t[:N], 1)
-        ret[:, :-1] += t[N:]
+        ts = t[:N]
+        tt = np.zeros(M)
+        tt[:M-1] = t[N:]
+        ret = np.expand_dims(ts, 1) + np.expand_dims(tt, 0)
         return ret.flatten()
 
     def apply_AGAt(N: int, M: int, G, t):
@@ -128,7 +129,6 @@ class TransportationMatrix:
         ctt = btt
         cts = bts - L.transpose() @ btt
         ct = np.concatenate((cts, ctt))
-
         return ct
 
 
@@ -189,8 +189,6 @@ class TransportationProblem:
         assert (self.costs >= 0.0).all()
         assert np.isclose(self.costs.mean(), 1.0)
         ret = np.zeros(self.N + self.M - 1)
-        mincost = self.costs.min(axis=1)
-        maxcost = self.costs.max(axis=1)
         ret[: self.N] = -margin / 2
         ret[self.N :] = -margin / 2
         return ret
@@ -335,7 +333,7 @@ class TransportationProblem:
 
     def solve_mpc(
         self,
-        max_iter=100,
+        max_iter=1000000,
         eps=1e-9,
         theta=0.9995,
         verbose=2,
